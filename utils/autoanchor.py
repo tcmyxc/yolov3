@@ -9,10 +9,10 @@ from tqdm import tqdm
 
 def check_anchor_order(m):
     # Check anchor order against stride order for YOLOv3 Detect() module m, and correct if necessary
-    a = m.anchor_grid.prod(-1).view(-1)  # anchor area
+    a = m.anchor_grid.prod(-1).view(-1)  # anchor area(最后一个维度的元素做乘法, 由于只有两个元素, 所以是面积)
     da = a[-1] - a[0]  # delta a
     ds = m.stride[-1] - m.stride[0]  # delta s
-    if da.sign() != ds.sign():  # same order
+    if da.sign() != ds.sign():  # same order, 如果符号不一致, 说明顺序反了
         print('Reversing anchor order')
         m.anchors[:] = m.anchors.flip(0)
         m.anchor_grid[:] = m.anchor_grid.flip(0)
