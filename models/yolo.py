@@ -62,7 +62,7 @@ class Detect(nn.Module):
     @staticmethod
     def _make_grid(nx=20, ny=20):
         # xv, yv 对应每个网格左上角的横纵坐标
-        yv, xv = torch.meshgrid([torch.arange(ny), torch.arange(nx)])
+        yv, xv = torch.meshgrid([torch.arange(ny), torch.arange(nx)], indexing='ij')
         return torch.stack((xv, yv), 2).view((1, 1, ny, nx, 2)).float()  # 多加了两个维度
 
 
