@@ -25,18 +25,19 @@ except ImportError:
 
 
 class Detect(nn.Module):
+    """检测头"""
     stride = None  # strides computed during build
     export = False  # onnx export
 
     def __init__(self, nc=80, anchors=(), ch=()):  # detection layer
         super(Detect, self).__init__()
-        self.nc = nc  # number of classes
-        self.no = nc + 5  # number of outputs per anchor
-        self.nl = len(anchors)  # number of detection layers
-        self.na = len(anchors[0]) // 2  # number of anchors
+        self.nc = nc  # number of classes, 类别数量
+        self.no = nc + 5  # number of outputs per anchor, 每个anchor的输出: 是否有感兴趣的物体+四个坐标+每个类别的概率
+        self.nl = len(anchors)  # number of detection layers, 检测层的数量(每一层都有对应匹配的anchor)
+        self.na = len(anchors[0]) // 2  # number of anchors, 一般是3个anchor
         self.grid = [torch.zeros(1)] * self.nl  # init grid
         a = torch.tensor(anchors).float().view(self.nl, -1, 2)
-        self.register_buffer('anchors', a)  # shape(nl,na,2)
+        self.register_buffer('anchors', a)  # shape(nl,na,2)  # 注册到模型自身缓存（不会被更新）
         self.register_buffer('anchor_grid', a.clone().view(self.nl, 1, -1, 1, 1, 2))  # shape(nl,1,na,1,1,2)
         self.m = nn.ModuleList(nn.Conv2d(x, self.no * self.na, 1) for x in ch)  # output conv
 
@@ -80,9 +81,11 @@ class Model(nn.Module):
         # Define model
         if nc and nc != self.yaml['nc']:
             logger.info('Overriding model.yaml nc=%g with nc=%g' % (self.yaml['nc'], nc))
-            self.yaml['nc'] = nc  # override yaml value
-        self.model, self.save = parse_model(deepcopy(self.yaml), ch=[ch])  # model, savelist, ch_out
-        self.names = [str(i) for i in range(self.yaml['nc'])]  # default names
+            self.yaml['nc'] = nc  # override yaml value, 类别数
+
+        self.model, self.save = parse_model(deepcopy(self.yaml), ch=[ch])  # model, savelist, ch_out, 创建模型
+
+        self.names = [str(i) for i in range(self.yaml['nc'])]  # default names, 数字形式
         # print([x.shape for x in self.forward(torch.zeros(1, ch, 64, 64))])
 
         # Build strides, anchors
@@ -200,11 +203,12 @@ class Model(nn.Module):
 def parse_model(d, ch):  # model_dict, input_channels(3)
     logger.info('\n%3s%18s%3s%10s  %-40s%-30s' % ('', 'from', 'n', 'params', 'module', 'arguments'))
     anchors, nc, gd, gw = d['anchors'], d['nc'], d['depth_multiple'], d['width_multiple']
-    na = (len(anchors[0]) // 2) if isinstance(anchors, list) else anchors  # number of anchors
+    na = (len(anchors[0]) // 2) if isinstance(anchors, list) else anchors  # number of anchors, anchor数量
     no = na * (nc + 5)  # number of outputs = anchors * (classes + 5)
 
-    layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
-    for i, (f, n, m, args) in enumerate(d['backbone'] + d['head']):  # from, number, module, args
+    layers, save, c2 = [], [], ch[-1]  # layers, savelist: 输出保存层的列表, ch out: 输出channel数量
+    for i, (f, n, m, args) in enumerate(d['backbone'] + d['head']):
+        # from: 输入从哪一层来的, number: 本模块的数量, module: 模块名, args: 模块参数
         m = eval(m) if isinstance(m, str) else m  # eval strings
         for j, a in enumerate(args):
             try:
@@ -214,7 +218,7 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
 
         n = max(round(n * gd), 1) if n > 1 else n  # depth gain
         if m in [Conv, Bottleneck, SPP, DWConv, MixConv2d, Focus, CrossConv, BottleneckCSP, C3]:
-            c1, c2 = ch[f], args[0]
+            c1, c2 = ch[f], args[0]  # 输入输出的channel
 
             # Normal
             # if i > 0 and args[0] != no:  # channel expansion factor
@@ -234,7 +238,7 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
             # if m != Focus:
             #     c2 = make_divisible(c2, 8) if c2 != no else c2
 
-            args = [c1, c2, *args[1:]]
+            args = [c1, c2, *args[1:]] # [out_channel, ...] -> [in_channel, out_channel, ...]
             if m in [BottleneckCSP, C3]:
                 args.insert(2, n)
                 n = 1
@@ -252,7 +256,7 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
         else:
             c2 = ch[f]
 
-        m_ = nn.Sequential(*[m(*args) for _ in range(n)]) if n > 1 else m(*args)  # module
+        m_ = nn.Sequential(*[m(*args) for _ in range(n)]) if n > 1 else m(*args)  # module, 构造模块
         t = str(m)[8:-2].replace('__main__.', '')  # module type
         np = sum([x.numel() for x in m_.parameters()])  # number params
         m_.i, m_.f, m_.type, m_.np = i, f, t, np  # attach index, 'from' index, type, number params
@@ -274,8 +278,8 @@ if __name__ == '__main__':
 
     # Create model
     model = Model(opt.cfg).to(device)
-    model.train()
-
+    # model.train()
+    print(model.info())
     # Profile
     # img = torch.rand(8 if torch.cuda.is_available() else 1, 3, 640, 640).to(device)
     # y = model(img, profile=True)
