@@ -139,6 +139,7 @@ class LoadImages:  # for inference
         self.nf = ni + nv  # number of files
         self.video_flag = [False] * ni + [True] * nv
         self.mode = 'images'
+        # any: 如果 iterable 的任一元素为真则返回 True。 如果迭代器为空，返回 False
         if any(videos):
             self.new_video(videos[0])  # new video
         else:
@@ -329,11 +330,14 @@ class LoadStreams:  # multiple IP or RTSP cameras
 
 def img2label_paths(img_paths):
     # Define label paths as a function of image paths
+    # os.sep 操作系统用来分隔路径不同部分的字符。在 POSIX 上是 '/'，在 Windows 上是是 '\\'
     sa, sb = os.sep + 'images' + os.sep, os.sep + 'labels' + os.sep  # /images/, /labels/ substrings
+    # 把sa替换成sb, 并且只替换第一个, 之后把后缀名变成txt
     return [x.replace(sa, sb, 1).replace('.' + x.split('.')[-1], '.txt') for x in img_paths]
 
 
 class LoadImagesAndLabels(Dataset):  # for training/testing
+    """dataset"""
     def __init__(self, path, img_size=640, batch_size=16, augment=False, hyp=None, rect=False, image_weights=False,
                  cache_images=False, single_cls=False, stride=32, pad=0.0, rank=-1):
         self.img_size = img_size
@@ -358,14 +362,15 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                         f += [x.replace('./', parent) if x.startswith('./') else x for x in t]  # local to global path
                 else:
                     raise Exception('%s does not exist' % p)
-            self.img_files = sorted([x.replace('/', os.sep) for x in f if x.split('.')[-1].lower() in img_formats])
+            self.img_files = sorted([x.replace('/', os.sep) for x in f if x.split('.')[-1].lower() in img_formats])  # 排个序
             assert self.img_files, 'No images found'
         except Exception as e:
             raise Exception('Error loading data from %s: %s\nSee %s' % (path, e, help_url))
 
         # Check cache
         self.label_files = img2label_paths(self.img_files)  # labels
-        cache_path = Path(self.label_files[0]).parent.with_suffix('.cache')  # cached labels
+        cache_path = Path(self.label_files[0]).parent.with_suffix('.cache')  # cached labels, 缓存
+        # 如果缓存文件存在, 则直接加载; 如果缓存被修改了或者没有缓存, 则生成缓存
         if cache_path.is_file():
             cache = torch.load(cache_path)  # load
             if cache['hash'] != get_hash(self.label_files + self.img_files) or 'results' not in cache:  # changed
@@ -374,7 +379,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             cache = self.cache_labels(cache_path)  # cache
 
         # Display cache
-        [nf, nm, ne, nc, n] = cache.pop('results')  # found, missing, empty, corrupted, total
+        [nf, nm, ne, nc, n] = cache.pop('results')  # found, missing, empty, corrupted, total, 同时移除results信息
         desc = f"Scanning '{cache_path}' for images and labels... {nf} found, {nm} missing, {ne} empty, {nc} corrupted"
         tqdm(None, desc=desc, total=n, initial=n)
         assert nf > 0 or not augment, f'No labels found in {cache_path}. Can not train without labels. See {help_url}'
@@ -382,27 +387,30 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         # Read cache
         cache.pop('hash')  # remove hash
         labels, shapes = zip(*cache.values())
-        self.labels = list(labels)
-        self.shapes = np.array(shapes, dtype=np.float64)
-        self.img_files = list(cache.keys())  # update
-        self.label_files = img2label_paths(cache.keys())  # update
+        self.labels = list(labels)  # 标注信息
+        self.shapes = np.array(shapes, dtype=np.float64)  # 图片大小
+        self.img_files = list(cache.keys())  # update 图片信息
+        self.label_files = img2label_paths(cache.keys())  # update 标注文件信息
         if single_cls:
             for x in self.labels:
-                x[:, 0] = 0
+                x[:, 0] = 0  # 把第一列, 也就是类别那一列都变成0
 
         n = len(shapes)  # number of images
         bi = np.floor(np.arange(n) / batch_size).astype(np.int)  # batch index
-        nb = bi[-1] + 1  # number of batches
+        nb = bi[-1] + 1  # number of batches 小批次的数量
         self.batch = bi  # batch index of image
         self.n = n
         self.indices = range(n)
 
-        # Rectangular Training
+        # Rectangular Training 矩形训练
+        # todo 暂时不讲
+        # https://blog.csdn.net/zicai_jiayou/article/details/109623578
         if self.rect:
             # Sort by aspect ratio
             s = self.shapes  # wh
             ar = s[:, 1] / s[:, 0]  # aspect ratio
-            irect = ar.argsort()
+            irect = ar.argsort()  # 将x中的元素从小到大排列，提取其对应的index(索引)
+            # 下面几行就是根据索引把数据重新排列一下
             self.img_files = [self.img_files[i] for i in irect]
             self.label_files = [self.label_files[i] for i in irect]
             self.labels = [self.labels[i] for i in irect]
@@ -412,7 +420,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             # Set training image shapes
             shapes = [[1, 1]] * nb
             for i in range(nb):
-                ari = ar[bi == i]
+                ari = ar[bi == i]  # 取对应的小批次
                 mini, maxi = ari.min(), ari.max()
                 if maxi < 1:
                     shapes[i] = [maxi, 1]
@@ -436,35 +444,38 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
     def cache_labels(self, path=Path('./labels.cache')):
         # Cache dataset labels, check images and read shapes
         x = {}  # dict
-        nm, nf, ne, nc = 0, 0, 0, 0  # number missing, found, empty, duplicate
+        # 少了多少 发现多少 空文件多少 损坏多少
+        nm, nf, ne, nc = 0, 0, 0, 0  # number missing, found, empty, corrupted
         pbar = tqdm(zip(self.img_files, self.label_files), desc='Scanning images', total=len(self.img_files))
         for i, (im_file, lb_file) in enumerate(pbar):
             try:
                 # verify images
                 im = Image.open(im_file)
-                im.verify()  # PIL verify
-                shape = exif_size(im)  # image size
+                im.verify()  # PIL verify 验证文件是否损坏
+                shape = exif_size(im)  # image size 获取图片尺寸
                 assert (shape[0] > 9) & (shape[1] > 9), 'image size <10 pixels'
 
                 # verify labels
                 if os.path.isfile(lb_file):
-                    nf += 1  # label found
+                    nf += 1  # label found 标签数量+1
                     with open(lb_file, 'r') as f:
+                        # 转numpy数组
                         l = np.array([x.split() for x in f.read().strip().splitlines()], dtype=np.float32)  # labels
                     if len(l):
+                        # 一些信息的校验
                         assert l.shape[1] == 5, 'labels require 5 columns each'
                         assert (l >= 0).all(), 'negative labels'
                         assert (l[:, 1:] <= 1).all(), 'non-normalized or out of bounds coordinate labels'
-                        assert np.unique(l, axis=0).shape[0] == l.shape[0], 'duplicate labels'
+                        assert np.unique(l, axis=0).shape[0] == l.shape[0], 'duplicate labels'  # 有重复的标注信息
                     else:
-                        ne += 1  # label empty
+                        ne += 1  # label empty 空文件
                         l = np.zeros((0, 5), dtype=np.float32)
                 else:
-                    nm += 1  # label missing
+                    nm += 1  # label missing  丢失文件+1
                     l = np.zeros((0, 5), dtype=np.float32)
-                x[im_file] = [l, shape]
+                x[im_file] = [l, shape]  # key: 图片 val: 标注信息+图片大小
             except Exception as e:
-                nc += 1
+                nc += 1  # 损坏文件+1
                 print('WARNING: Ignoring corrupted image and/or label %s: %s' % (im_file, e))
 
             pbar.desc = f"Scanning '{path.parent / path.stem}' for images and labels... " \
@@ -473,7 +484,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         if nf == 0:
             print(f'WARNING: No labels found in {path}. See {help_url}')
 
-        x['hash'] = get_hash(self.label_files + self.img_files)
+        x['hash'] = get_hash(self.label_files + self.img_files)  # 计算hash值
         x['results'] = [nf, nm, ne, nc, i + 1]
         torch.save(x, path)  # save for next time
         logging.info(f"New cache created: {path}")
@@ -507,6 +518,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
         else:
             # Load image
+            # img, original hw, resized hw
             img, (h0, w0), (h, w) = load_image(self, index)
 
             # Letterbox
@@ -567,7 +579,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
         # Convert
         img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
-        img = np.ascontiguousarray(img)
+        img = np.ascontiguousarray(img)  # 内存连续
 
         return torch.from_numpy(img), labels_out, self.img_files[index], shapes
 
