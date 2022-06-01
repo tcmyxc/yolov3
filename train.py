@@ -183,7 +183,7 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
     if cuda and rank != -1:
         model = DDP(model, device_ids=[opt.local_rank], output_device=opt.local_rank)
 
-    # Trainloader
+    # Trainloader 训练数据集
     dataloader, dataset = create_dataloader(train_path, imgsz, batch_size, gs, opt,
                                             hyp=hyp, augment=True, cache=opt.cache_images, rect=opt.rect, rank=rank,
                                             world_size=opt.world_size, workers=opt.workers,
@@ -195,6 +195,7 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
     # Process 0
     if rank in [-1, 0]:
         ema.updates = start_epoch * nb // accumulate  # set EMA updates
+        # 验证数据集
         testloader = create_dataloader(test_path, imgsz_test, total_batch_size, gs, opt,  # testloader
                                        hyp=hyp, cache=opt.cache_images and not opt.notest, rect=True,
                                        rank=-1, world_size=opt.world_size, workers=opt.workers, pad=0.5)[0]
@@ -427,9 +428,9 @@ if __name__ == '__main__':
     parser.add_argument('--cfg', type=str, default='', help='model.yaml path')
     parser.add_argument('--data', type=str, default='data/coco128.yaml', help='data.yaml path')
     parser.add_argument('--hyp', type=str, default='data/hyp.scratch.yaml', help='hyperparameters path')
-    parser.add_argument('--epochs', type=int, default=300)
-    parser.add_argument('--batch-size', type=int, default=16, help='total batch size for all GPUs')
-    parser.add_argument('--img-size', nargs='+', type=int, default=[640, 640], help='[train, test] image sizes')
+    parser.add_argument('--epochs', type=int, default=1)
+    parser.add_argument('--batch-size', type=int, default=1, help='total batch size for all GPUs')
+    parser.add_argument('--img-size', nargs='+', type=int, default=[320, 320], help='[train, test] image sizes')
     parser.add_argument('--rect', action='store_true', help='rectangular training')
     parser.add_argument('--resume', nargs='?', const=True, default=False, help='resume most recent training')
     parser.add_argument('--nosave', action='store_true', help='only save final checkpoint')

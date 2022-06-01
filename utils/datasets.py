@@ -41,9 +41,11 @@ def get_hash(files):
 
 def exif_size(img):
     # Returns exif-corrected PIL size
+    # 获取图片原始的宽高
     s = img.size  # (width, height)
     try:
         rotation = dict(img._getexif().items())[orientation]
+        # 如果图片旋转了90度或者-90度
         if rotation == 6:  # rotation 270
             s = (s[1], s[0])
         elif rotation == 8:  # rotation 90
@@ -338,8 +340,19 @@ def img2label_paths(img_paths):
 
 class LoadImagesAndLabels(Dataset):  # for training/testing
     """dataset"""
-    def __init__(self, path, img_size=640, batch_size=16, augment=False, hyp=None, rect=False, image_weights=False,
-                 cache_images=False, single_cls=False, stride=32, pad=0.0, rank=-1):
+    def __init__(self,
+                 path,
+                 img_size=640,
+                 batch_size=16,
+                 augment=False,
+                 hyp=None,
+                 rect=False,
+                 image_weights=False,
+                 cache_images=False,
+                 single_cls=False,
+                 stride=32,
+                 pad=0.0,
+                 rank=-1):
         self.img_size = img_size
         self.augment = augment
         self.hyp = hyp
@@ -347,7 +360,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         self.rect = False if image_weights else rect
         self.mosaic = self.augment and not self.rect  # load 4 images at a time into a mosaic (only during training)
         self.mosaic_border = [-img_size // 2, -img_size // 2]
-        self.stride = stride
+        self.stride = stride  # 32
 
         try:
             f = []  # image files
@@ -408,8 +421,8 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         if self.rect:
             # Sort by aspect ratio
             s = self.shapes  # wh
-            ar = s[:, 1] / s[:, 0]  # aspect ratio
-            irect = ar.argsort()  # 将x中的元素从小到大排列，提取其对应的index(索引)
+            ar = s[:, 1] / s[:, 0]  # aspect ratio, h/w
+            irect = ar.argsort()  # 将x中的元素从小到大排列, 提取其对应的index(索引), 这样每个batch就有类似的高宽比
             # 下面几行就是根据索引把数据重新排列一下
             self.img_files = [self.img_files[i] for i in irect]
             self.label_files = [self.label_files[i] for i in irect]
@@ -422,17 +435,21 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             for i in range(nb):
                 ari = ar[bi == i]  # 取对应的小批次
                 mini, maxi = ari.min(), ari.max()
+                # 如果最大的都小于1, 说明h都小于w
+                # h/w<1, 也就是h<w, 将宽度设为img_size
                 if maxi < 1:
                     shapes[i] = [maxi, 1]
+                # 最小的都大于1, 说明都是 h>w
                 elif mini > 1:
                     shapes[i] = [1, 1 / mini]
 
+            # np.ceil(np.array(shapes) * img_size / 32).astype(np.int) * 32 最终的图片大小是32的整数倍
             self.batch_shapes = np.ceil(np.array(shapes) * img_size / stride + pad).astype(np.int) * stride
 
         # Cache images into memory for faster training (WARNING: large datasets may exceed system RAM)
         self.imgs = [None] * n
         if cache_images:
-            gb = 0  # Gigabytes of cached images
+            gb = 0  # Gigabytes of cached images 记录缓存图像占用内存
             self.img_hw0, self.img_hw = [None] * n, [None] * n
             results = ThreadPool(8).imap(lambda x: load_image(*x), zip(repeat(self), range(n)))  # 8 threads
             pbar = tqdm(enumerate(results), total=n)
