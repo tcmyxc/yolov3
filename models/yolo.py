@@ -11,8 +11,7 @@ import torch.nn as nn
 sys.path.append('./')  # to run '$ python *.py' files in subdirectories
 logger = logging.getLogger(__name__)
 
-from models.common import Conv, Bottleneck, SPP, BottleneckCSP, Concat, autoShape
-from models.experimental import C3
+from models.common import Conv, Bottleneck, SPP, Concat, autoShape
 from utils.autoanchor import check_anchor_order
 from utils.general import make_divisible, check_file, set_logging
 from utils.torch_utils import fuse_conv_and_bn, model_info, initialize_weights, select_device, copy_attr
@@ -42,7 +41,7 @@ class Detect(nn.Module):
         for i in range(self.nl):
             # x[i] 是预测头的输出, 需要reshape
             x[i] = self.m[i](x[i])  # conv
-            bs, _, ny, nx = x[i].shape  # x(bs,255,20,20) to x(bs,3,20,20,85)
+            bs, _, ny, nx = x[i].shape  # x(bs,255,20,20)
             # bs, 3, 85, 20, 20 -> bs, 3, 20, 20, 85
             # contiguous 变成内存连续的变量
             x[i] = x[i].view(bs, self.na, self.no, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
@@ -164,7 +163,7 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
     layers, save, c2 = [], [], ch[-1]
     for i, (f, n, m, args) in enumerate(d['backbone'] + d['head']):
         # from: 输入从哪一层来的, number: 本模块的数量, module: 模块名, args: 模块参数
-        m = eval(m) if isinstance(m, str) else m  # eval strings
+        m = eval(m) if isinstance(m, str) else m  # eval strings, 解析 m 属于哪个具体的类
         for j, a in enumerate(args):
             try:
                 args[j] = eval(a) if isinstance(a, str) else a  # eval strings
@@ -181,9 +180,6 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
             c2 = make_divisible(c2 * gw, 8) if c2 != no else c2
 
             args = [c1, c2, *args[1:]]  # [out_channel, ...] -> [in_channel, out_channel, ...]
-            if m in [BottleneckCSP, C3]:
-                args.insert(2, n)
-                n = 1
         elif m is Concat:
             # 如果需要拼接, 则输出channel应该是这些层channel数量的总和
             c2 = sum([ch[-1 if x == -1 else x + 1] for x in f])  # f:[-1, 8]
