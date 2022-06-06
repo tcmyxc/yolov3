@@ -35,13 +35,16 @@ for orientation in ExifTags.TAGS.keys():
 
 
 def get_hash(files):
+    """
+    计算hash值。hash值就是文件大小的总和
+    """
     # Returns a single hash value of a list of files
     return sum(os.path.getsize(f) for f in files if os.path.isfile(f))
 
 
 def exif_size(img):
+    """获取图片原始的宽高"""
     # Returns exif-corrected PIL size
-    # 获取图片原始的宽高
     s = img.size  # (width, height)
     try:
         rotation = dict(img._getexif().items())[orientation]
@@ -71,8 +74,8 @@ def create_dataloader(path, imgsz, batch_size, stride, opt, hyp=None, augment=Fa
                                       rank=rank,
                                       image_weights=image_weights)
 
-    batch_size = min(batch_size, len(dataset))
-    nw = min([os.cpu_count() // world_size, batch_size if batch_size > 1 else 0, workers])  # number of workers
+    batch_size = min(batch_size, len(dataset))  # 确定bs大小
+    nw = min([os.cpu_count() // world_size, batch_size if batch_size > 1 else 0, workers])  # 确定workers数量
     sampler = torch.utils.data.distributed.DistributedSampler(dataset) if rank != -1 else None
     loader = torch.utils.data.DataLoader if image_weights else InfiniteDataLoader
     # Use torch.utils.data.DataLoader() if dataset.properties will update during training else InfiniteDataLoader()
@@ -358,58 +361,67 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         self.hyp = hyp
         self.image_weights = image_weights
         self.rect = False if image_weights else rect
+        # todo: 暂时不讲
         self.mosaic = self.augment and not self.rect  # load 4 images at a time into a mosaic (only during training)
         self.mosaic_border = [-img_size // 2, -img_size // 2]
         self.stride = stride  # 32
 
         try:
-            f = []  # image files
-            for p in path if isinstance(path, list) else [path]:
+            f = []  # 图片列表
+            for p in path if isinstance(path, list) else [path]:  # 转list
                 p = Path(p)  # os-agnostic
-                if p.is_dir():  # dir
+                if p.is_dir():  # 文件夹则遍历文件夹下所有文件
                     f += glob.glob(str(p / '**' / '*.*'), recursive=True)
-                elif p.is_file():  # file
+                elif p.is_file():  # 文件则读文件
                     with open(p, 'r') as t:
                         t = t.read().strip().splitlines()
-                        parent = str(p.parent) + os.sep
+                        parent = str(p.parent) + os.sep  # 获取父路径
+                        # 转为绝对路径
                         f += [x.replace('./', parent) if x.startswith('./') else x for x in t]  # local to global path
                 else:
                     raise Exception('%s does not exist' % p)
-            self.img_files = sorted([x.replace('/', os.sep) for x in f if x.split('.')[-1].lower() in img_formats])  # 排个序
-            assert self.img_files, 'No images found'
+
+            # 保存图片格式的文件，同时对列表排序
+            self.img_files = sorted([x.replace('/', os.sep) for x in f if x.split('.')[-1].lower() in img_formats])
+            assert self.img_files, 'No images found'  # 确保要有图片
         except Exception as e:
             raise Exception('Error loading data from %s: %s\nSee %s' % (path, e, help_url))
 
-        # Check cache
-        self.label_files = img2label_paths(self.img_files)  # labels
+        self.label_files = img2label_paths(self.img_files)  # 获取label(这里调用的函数本质上就是字符串简单替换)
+        # 检查缓存
         cache_path = Path(self.label_files[0]).parent.with_suffix('.cache')  # cached labels, 缓存
         # 如果缓存文件存在, 则直接加载; 如果缓存被修改了或者没有缓存, 则生成缓存
         if cache_path.is_file():
-            cache = torch.load(cache_path)  # load
+            cache = torch.load(cache_path)  # 加载缓存
+            # 如果缓存被修改，则重新生成缓存
             if cache['hash'] != get_hash(self.label_files + self.img_files) or 'results' not in cache:  # changed
                 cache = self.cache_labels(cache_path)  # re-cache
         else:
             cache = self.cache_labels(cache_path)  # cache
 
         # Display cache
-        [nf, nm, ne, nc, n] = cache.pop('results')  # found, missing, empty, corrupted, total, 同时移除results信息
+        # pop: 如果 key 存在于字典中则将其移除并返回其值，否则返回 default
+        # 接收results信息，把信息保存到变量
+        [nf, nm, ne, nc, n] = cache.pop('results')  # found, missing, empty, corrupted, total
         desc = f"Scanning '{cache_path}' for images and labels... {nf} found, {nm} missing, {ne} empty, {nc} corrupted"
         tqdm(None, desc=desc, total=n, initial=n)
         assert nf > 0 or not augment, f'No labels found in {cache_path}. Can not train without labels. See {help_url}'
 
         # Read cache
+        # 从cache移除hash值信息
         cache.pop('hash')  # remove hash
         labels, shapes = zip(*cache.values())
         self.labels = list(labels)  # 标注信息
         self.shapes = np.array(shapes, dtype=np.float64)  # 图片大小
         self.img_files = list(cache.keys())  # update 图片信息
         self.label_files = img2label_paths(cache.keys())  # update 标注文件信息
+        # 如果是单个类别
         if single_cls:
             for x in self.labels:
                 x[:, 0] = 0  # 把第一列, 也就是类别那一列都变成0
 
-        n = len(shapes)  # number of images
-        bi = np.floor(np.arange(n) / batch_size).astype(np.int)  # batch index
+        n = len(shapes)  # 图片数量
+        bi = np.floor(np.arange(n) / batch_size).astype(np.int)  # 小批量的索引
         nb = bi[-1] + 1  # number of batches 小批次的数量
         self.batch = bi  # batch index of image
         self.n = n
@@ -447,6 +459,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             self.batch_shapes = np.ceil(np.array(shapes) * img_size / stride + pad).astype(np.int) * stride
 
         # Cache images into memory for faster training (WARNING: large datasets may exceed system RAM)
+        # 把图片缓存到内存中加速训练(默认不开启图片缓存)
         self.imgs = [None] * n
         if cache_images:
             gb = 0  # Gigabytes of cached images 记录缓存图像占用内存
@@ -541,6 +554,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             # Letterbox
             shape = self.batch_shapes[self.batch[index]] if self.rect else self.img_size  # final letterboxed shape
             img, ratio, pad = letterbox(img, shape, auto=False, scaleup=self.augment)
+            # todo 看到这里
             shapes = (h0, w0), ((h / h0, w / w0), pad)  # for COCO mAP rescaling
 
             # Load labels
@@ -610,6 +624,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
 # Ancillary functions --------------------------------------------------------------------------------------------------
 def load_image(self, index):
+    """loads 1 image from dataset, returns img, original hw, resized hw"""
     # loads 1 image from dataset, returns img, original hw, resized hw
     img = self.imgs[index]
     if img is None:  # not cached
@@ -721,21 +736,26 @@ def replicate(img, labels):
 
 
 def letterbox(img, new_shape=(640, 640), color=(114, 114, 114), auto=True, scaleFill=False, scaleup=True):
+    """Resize image to a 32-pixel-multiple rectangle"""
     # Resize image to a 32-pixel-multiple rectangle https://github.com/ultralytics/yolov3/issues/232
-    shape = img.shape[:2]  # current shape [height, width]
+    shape = img.shape[:2]  # current shape [height, width] 原始图片宽高
     if isinstance(new_shape, int):
         new_shape = (new_shape, new_shape)
 
     # Scale ratio (new / old)
+    # 缩放比例，这里会把长边缩放到32的倍数，短边填充
     r = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
     if not scaleup:  # only scale down, do not scale up (for better test mAP)
         r = min(r, 1.0)
 
     # Compute padding
+    # 计算填充
     ratio = r, r  # width, height ratios
+    # 缩放后图片的尺寸
     new_unpad = int(round(shape[1] * r)), int(round(shape[0] * r))
+    # 计算需要填充的数量
     dw, dh = new_shape[1] - new_unpad[0], new_shape[0] - new_unpad[1]  # wh padding
-    if auto:  # minimum rectangle
+    if auto:  # minimum rectangle 最小的矩形，不填充成正方形
         dw, dh = np.mod(dw, 32), np.mod(dh, 32)  # wh padding
     elif scaleFill:  # stretch
         dw, dh = 0.0, 0.0
@@ -745,11 +765,17 @@ def letterbox(img, new_shape=(640, 640), color=(114, 114, 114), auto=True, scale
     dw /= 2  # divide padding into 2 sides
     dh /= 2
 
+    # 缩放
+    # shape[::-1] 意思是反转
     if shape[::-1] != new_unpad:  # resize
         img = cv2.resize(img, new_unpad, interpolation=cv2.INTER_LINEAR)
+
+    # 填充
+    # 上窄下宽 左窄右宽(加减0.1是避免0.5这种情况的存在，不然会多一个像素)
     top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
     left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
     img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)  # add border
+    # cv2.imwrite("tmp.jpg", img)  # 调试使用
     return img, ratio, (dw, dh)
 
 
