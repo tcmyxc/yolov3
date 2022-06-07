@@ -203,63 +203,6 @@ class LoadImages:  # for inference
         return self.nf  # number of files
 
 
-class LoadWebcam:  # for inference
-    def __init__(self, pipe='0', img_size=640):
-        self.img_size = img_size
-
-        if pipe.isnumeric():
-            pipe = eval(pipe)  # local camera
-        # pipe = 'rtsp://192.168.1.64/1'  # IP camera
-        # pipe = 'rtsp://username:password@192.168.1.64/1'  # IP camera with login
-        # pipe = 'http://wmccpinetop.axiscam.net/mjpg/video.mjpg'  # IP golf camera
-
-        self.pipe = pipe
-        self.cap = cv2.VideoCapture(pipe)  # video capture object
-        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 3)  # set buffer size
-
-    def __iter__(self):
-        self.count = -1
-        return self
-
-    def __next__(self):
-        self.count += 1
-        if cv2.waitKey(1) == ord('q'):  # q to quit
-            self.cap.release()
-            cv2.destroyAllWindows()
-            raise StopIteration
-
-        # Read frame
-        if self.pipe == 0:  # local camera
-            ret_val, img0 = self.cap.read()
-            img0 = cv2.flip(img0, 1)  # flip left-right
-        else:  # IP camera
-            n = 0
-            while True:
-                n += 1
-                self.cap.grab()
-                if n % 30 == 0:  # skip frames
-                    ret_val, img0 = self.cap.retrieve()
-                    if ret_val:
-                        break
-
-        # Print
-        assert ret_val, 'Camera Error %s' % self.pipe
-        img_path = 'webcam.jpg'
-        print('webcam %g: ' % self.count, end='')
-
-        # Padded resize
-        img = letterbox(img0, new_shape=self.img_size)[0]
-
-        # Convert
-        img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
-        img = np.ascontiguousarray(img)
-
-        return img_path, img, img0, None
-
-    def __len__(self):
-        return 0
-
-
 class LoadStreams:  # multiple IP or RTSP cameras
     def __init__(self, sources='streams.txt', img_size=640):
         self.mode = 'images'
@@ -427,7 +370,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         self.n = n
         self.indices = range(n)
 
-        # Rectangular Training 矩形训练
+        # Rectangular Training 矩形训练，默认测试时开启
         # todo 暂时不讲
         # https://blog.csdn.net/zicai_jiayou/article/details/109623578
         if self.rect:
@@ -523,19 +466,13 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
     def __len__(self):
         return len(self.img_files)
 
-    # def __iter__(self):
-    #     self.count = -1
-    #     print('ran dataset iter')
-    #     #self.shuffled_vector = np.random.permutation(self.nF) if self.augment else np.arange(self.nF)
-    #     return self
-
     def __getitem__(self, index):
         index = self.indices[index]  # linear, shuffled, or image_weights
 
         hyp = self.hyp
         mosaic = self.mosaic and random.random() < hyp['mosaic']
         if mosaic:
-            # Load mosaic
+            # 训练时默认使用，但是我关掉了
             img, labels = load_mosaic(self, index)
             shapes = None
 
@@ -554,19 +491,20 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             # Letterbox
             shape = self.batch_shapes[self.batch[index]] if self.rect else self.img_size  # final letterboxed shape
             img, ratio, pad = letterbox(img, shape, auto=False, scaleup=self.augment)
-            # todo 看到这里
             shapes = (h0, w0), ((h / h0, w / w0), pad)  # for COCO mAP rescaling
 
-            # Load labels
+            # Load labels, [cls_inx, x, y, w, h]
             labels = []
             x = self.labels[index]
             if x.size > 0:
                 # Normalized xywh to pixel xyxy format
                 labels = x.copy()
-                labels[:, 1] = ratio[0] * w * (x[:, 1] - x[:, 3] / 2) + pad[0]  # pad width
-                labels[:, 2] = ratio[1] * h * (x[:, 2] - x[:, 4] / 2) + pad[1]  # pad height
-                labels[:, 3] = ratio[0] * w * (x[:, 1] + x[:, 3] / 2) + pad[0]
-                labels[:, 4] = ratio[1] * h * (x[:, 2] + x[:, 4] / 2) + pad[1]
+                # 转换为在处理过的图片上的绝对坐标
+                # xmin = xo - w/2, ymin = yo - h/2, xmax = xo + w/2, ymax = yo + h/2
+                labels[:, 1] = ratio[0] * w * (x[:, 1] - x[:, 3] / 2) + pad[0]  # xmin
+                labels[:, 2] = ratio[1] * h * (x[:, 2] - x[:, 4] / 2) + pad[1]  # ymin
+                labels[:, 3] = ratio[0] * w * (x[:, 1] + x[:, 3] / 2) + pad[0]  # xmax
+                labels[:, 4] = ratio[1] * h * (x[:, 2] + x[:, 4] / 2) + pad[1]  # ymax
 
         if self.augment:
             # Augment imagespace
@@ -581,17 +519,13 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             # Augment colorspace
             augment_hsv(img, hgain=hyp['hsv_h'], sgain=hyp['hsv_s'], vgain=hyp['hsv_v'])
 
-            # Apply cutouts
-            # if random.random() < 0.9:
-            #     labels = cutout(img, labels)
-
         nL = len(labels)  # number of labels
-        if nL:
+        if nL:  # 转换为xywh格式并归一化
             labels[:, 1:5] = xyxy2xywh(labels[:, 1:5])  # convert xyxy to xywh
             labels[:, [2, 4]] /= img.shape[0]  # normalized height 0-1
             labels[:, [1, 3]] /= img.shape[1]  # normalized width 0-1
 
-        if self.augment:
+        if self.augment:  # 一些数据增强
             # flip up-down
             if random.random() < hyp['flipud']:
                 img = np.flipud(img)
@@ -605,13 +539,14 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                     labels[:, 1] = 1 - labels[:, 1]
 
         labels_out = torch.zeros((nL, 6))
-        if nL:
+        if nL:  # 就只是多加了一个维度
             labels_out[:, 1:] = torch.from_numpy(labels)
 
-        # Convert
+        # Convert 先转rgb，然后把通道维度放到前面
         img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
         img = np.ascontiguousarray(img)  # 内存连续
 
+        # 图片数据 标签信息 图片路径 shape
         return torch.from_numpy(img), labels_out, self.img_files[index], shapes
 
     @staticmethod
@@ -844,15 +779,6 @@ def random_perspective(img, targets=(), degrees=10, translate=.1, scale=.1, shea
         x = xy[:, [0, 2, 4, 6]]
         y = xy[:, [1, 3, 5, 7]]
         xy = np.concatenate((x.min(1), y.min(1), x.max(1), y.max(1))).reshape(4, n).T
-
-        # # apply angle-based reduction of bounding boxes
-        # radians = a * math.pi / 180
-        # reduction = max(abs(math.sin(radians)), abs(math.cos(radians))) ** 0.5
-        # x = (xy[:, 2] + xy[:, 0]) / 2
-        # y = (xy[:, 3] + xy[:, 1]) / 2
-        # w = (xy[:, 2] - xy[:, 0]) * reduction
-        # h = (xy[:, 3] - xy[:, 1]) * reduction
-        # xy = np.concatenate((x - w / 2, y - h / 2, x + w / 2, y + h / 2)).reshape(4, n).T
 
         # clip boxes
         xy[:, [0, 2]] = xy[:, [0, 2]].clip(0, width)
