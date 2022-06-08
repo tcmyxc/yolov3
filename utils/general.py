@@ -98,12 +98,15 @@ def make_divisible(x, divisor):
 
 
 def labels_to_class_weights(labels, nc=80):
+    """Get class weights (inverse frequency) from training labels"""
     # Get class weights (inverse frequency) from training labels
     if labels[0] is None:  # no labels loaded
         return torch.Tensor()
 
     labels = np.concatenate(labels, 0)  # labels.shape = (866643, 5) for COCO
+    # 把第一列cls_idx取出来
     classes = labels[:, 0].astype(np.int)  # labels = [class xywh]
+    # 计算每个类别的出现次数
     weights = np.bincount(classes, minlength=nc)  # occurrences per class
 
     # Prepend gridpoint count (for uCE training)
