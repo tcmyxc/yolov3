@@ -23,35 +23,41 @@ class Detect(nn.Module):
     export = False  # onnx export
 
     def __init__(self, nc=80, anchors=(), ch=()):  # detection layer
+        # nc = 80,
+        # anchors = [[10, 13, 16, 30, 33, 23], [30, 61, 62, 45, 59, 119], [116, 90, 156, 198, 373, 326]]
+        # ch = [256, 512, 1024]]
         super(Detect, self).__init__()
         self.nc = nc  # number of classes, 80, 类别数量
         self.no = nc + 5  # number of outputs per anchor, 85, 每个anchor的输出: 是否有感兴趣的物体+四个坐标+每个类别的概率
         self.nl = len(anchors)  # number of detection layers, 3, 检测层的数量(每一层都有对应匹配的anchor)
         self.na = len(anchors[0]) // 2  # number of anchors, 3, 一般是3个anchor
-        self.grid = [torch.zeros(1)] * self.nl  # init grid
+        self.grid = [torch.zeros(1)] * self.nl  # 初始化网格
         a = torch.tensor(anchors).float().view(self.nl, -1, 2)  # 多加了一个维度, (3, 3, 2)
         self.register_buffer('anchors', a)  # shape(nl,na,2)  # 注册到模型自身缓存（不会被更新）
         self.register_buffer('anchor_grid', a.clone().view(self.nl, 1, -1, 1, 1, 2))  # shape(nl,1,na,1,1,2)
+        # 下面是三个检测头
         self.m = nn.ModuleList(nn.Conv2d(x, self.no * self.na, 1) for x in ch)  # output conv
 
     def forward(self, x):
-        # x = x.copy()  # for profiling
-        z = []  # inference output
+        z = []  # 推理阶段用到的输出
         self.training |= self.export
         for i in range(self.nl):
             # x[i] 是预测头的输出, 需要reshape
-            x[i] = self.m[i](x[i])  # conv
-            bs, _, ny, nx = x[i].shape  # x(bs,255,20,20)
-            # bs, 3, 85, 20, 20 -> bs, 3, 20, 20, 85
-            # contiguous 变成内存连续的变量
+            x[i] = self.m[i](x[i])  # 把输入送到对应的卷积层，得到对应的输出
+            bs, _, ny, nx = x[i].shape  # x(bs, 255, h, w)
+            # bs, 3, 85, h, w -> bs, 3, h, w, 85; contiguous 变成内存连续的变量
+            # 把特征图摞起来，纵向有255个点，对应3个锚框，每个点是锚框的一个预测信息
             x[i] = x[i].view(bs, self.na, self.no, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
 
-            if not self.training:  # inference
-                # x[i].shape[2:4] -> 20, 20, 85
+            if not self.training:  # 如果是推理模式
+                # x[i].shape[2:4] -> h, w
+                # grid[i].shape[2:4]最开始的值是torch.Size([])
+                # 如果预设的网格大小和特征图大小不匹配，则重新设置网格
                 if self.grid[i].shape[2:4] != x[i].shape[2:4]:
-                    self.grid[i] = self._make_grid(nx, ny).to(x[i].device)
+                    self.grid[i] = self._make_grid(nx, ny).to(x[i].device)  # 构造网格
 
                 y = x[i].sigmoid()
+                # 下面这部分变换和原始yolov3不一样，但是都是把预测出现的坐标信息映射到原始图片上
                 y[..., 0:2] = (y[..., 0:2] * 2. - 0.5 + self.grid[i].to(x[i].device)) * self.stride[i]  # xy
                 y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
                 z.append(y.view(bs, -1, self.no))
@@ -93,7 +99,7 @@ class Model(nn.Module):
             s = 128  # 2x min stride
             m.stride = torch.tensor([s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, s, s))])  # forward
 
-            m.anchors /= m.stride.view(-1, 1, 1)  # 映射到特征图
+            m.anchors /= m.stride.view(-1, 1, 1)  # 将锚框映射到特征图
             check_anchor_order(m)  # 检查anchor顺序和缩放比例的顺序对不对, 都是递增顺序
             self.stride = m.stride
             self._initialize_biases()  # only run once/
@@ -109,7 +115,7 @@ class Model(nn.Module):
         # 需要保存就保存, 不需要就直接赋值 None
         y = []
         for m in self.model:
-            if m.f != -1:  # if not from previous layer
+            if m.f != -1:  # 如果输入不是来自上一层
                 # 获取当前模块的实际输入到底是什么
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
 
@@ -124,10 +130,6 @@ class Model(nn.Module):
         m = self.model[-1]  # Detect() module
         for mi, s in zip(m.m, m.stride):  # from
             # .data 和 detach() 方法区别: https://www.jb51.net/article/177918.htm
-            # 这里原版有个bug, 但是已修复(最新版使用的是 .data方法), 也就是下面三行 leaf Variable inplace bug fix (#1619)
-            # b = mi.bias.view(m.na, -1)  # conv.bias(255) to (3,85)
-            # b.data[:, 4] += math.log(8 / (640 / s) ** 2)  # obj (8 objects per 640 image)
-            # b.data[:, 5:] += math.log(0.6 / (m.nc - 0.99)) if cf is None else torch.log(cf / cf.sum())  # cls
             b = mi.bias.view(m.na, -1).detach()  # conv.bias(255) to (3,85)
             b[:, 4] += math.log(8 / (640 / s) ** 2)  # obj (8 objects per 640 image)
             b[:, 5:] += math.log(0.6 / (m.nc - 0.99)) if cf is None else torch.log(cf / cf.sum())  # cls
@@ -184,6 +186,9 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
             # 如果需要拼接, 则输出channel应该是这些层channel数量的总和
             c2 = sum([ch[-1 if x == -1 else x + 1] for x in f])  # f:[-1, 8]
         elif m is Detect:
+            # args放的是nc和anchors的信息。之后再追加输出通道维度的信息
+            # [80, [[10, 13, 16, 30, 33, 23], [30, 61, 62, 45, 59, 119], [116, 90, 156, 198, 373, 326]]]
+            # -> [80, [[10, 13, 16, 30, 33, 23], [30, 61, 62, 45, 59, 119], [116, 90, 156, 198, 373, 326]], [256, 512, 1024]]
             args.append([ch[x + 1] for x in f])  # 加1是因为最开始有一个输入通道3
             if isinstance(args[1], int):  # number of anchors
                 args[1] = [list(range(args[1] * 2))] * len(f)
@@ -222,12 +227,6 @@ if __name__ == '__main__':
     model.train()
     # print(model.info())
     # Profile
-    img = torch.rand(8 if torch.cuda.is_available() else 1, 3, 640, 640).to(device)
+    img = torch.rand(1, 3, 640, 640).to(device)
     y = model(img)
 
-    # Tensorboard
-    # from torch.utils.tensorboard import SummaryWriter
-    # tb_writer = SummaryWriter()
-    # print("Run 'tensorboard --logdir=models/runs' to view tensorboard at http://localhost:6006/")
-    # tb_writer.add_graph(model.model, img)  # add model to tensorboard
-    # tb_writer.add_image('test', img[0], dataformats='CWH')  # add model to tensorboard

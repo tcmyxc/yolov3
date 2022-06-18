@@ -181,7 +181,7 @@ def train(hyp, opt, device, tb_writer=None):
                                             world_size=opt.world_size, workers=opt.workers,
                                             image_weights=opt.image_weights)
     mlc = np.concatenate(dataset.labels, 0)[:, 0].max()  # max label class
-    nb = len(dataloader)  # number of batches
+    nb = len(dataloader)  # 小批量的数量
     assert mlc < nc, 'Label class %g exceeds nc=%g in %s. Possible class labels are 0-%g' % (mlc, nc, opt.data, nc - 1)
 
     # Process 0
@@ -260,10 +260,12 @@ def train(hyp, opt, device, tb_writer=None):
         # 图片数据 标签信息 图片路径 shape
         # todo: 看到这里
         for i, (imgs, targets, paths, _) in pbar:  # batch -------------------------------------------------------------
+            # ni是数据流转了多少个小批量
             ni = i + nb * epoch  # number integrated batches (since train start)
+            # 归一化，同时把数据搬到相应的设备上
             imgs = imgs.to(device, non_blocking=True).float() / 255.0  # uint8 to float32, 0-255 to 0.0-1.0
 
-            # Warmup
+            # 预热阶段
             if ni <= nw:
                 xi = [0, nw]  # x interp
                 # model.gr = np.interp(ni, xi, [0.0, 1.0])  # iou loss ratio (obj_loss = 1.0 or iou)
