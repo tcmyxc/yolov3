@@ -20,7 +20,6 @@ from utils.torch_utils import fuse_conv_and_bn, model_info, initialize_weights, 
 class Detect(nn.Module):
     """检测头, 一般3个"""
     stride = None  # strides computed during build
-    export = False  # onnx export
 
     def __init__(self, nc=80, anchors=(), ch=()):  # detection layer
         # nc = 80,
@@ -40,7 +39,6 @@ class Detect(nn.Module):
 
     def forward(self, x):
         z = []  # 推理阶段用到的输出
-        self.training |= self.export
         for i in range(self.nl):
             # x[i] 是预测头的输出, 需要reshape
             x[i] = self.m[i](x[i])  # 把输入送到对应的卷积层，得到对应的输出

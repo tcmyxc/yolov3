@@ -85,6 +85,7 @@ def kmean_anchors(path='./data/coco128.yaml', n=9, img_size=640, thr=4.0, gen=10
         k = k[np.argsort(k.prod(1))]  # sort small to large
         x, best = metric(k, wh0)
         bpr, aat = (best > thr).float().mean(), (x > thr).float().mean() * n  # best possible recall, anch > thr
+        print("\n")
         print('thr=%.2f: %.4f best possible recall, %.2f anchors past thr' % (thr, bpr, aat))
         print('n=%g, img_size=%s, metric_all=%.3f/%.3f-mean/best, past_thr=%.3f-mean: ' %
               (n, img_size, x.mean(), best.mean(), x[x > thr].mean()), end='')
