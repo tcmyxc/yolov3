@@ -59,7 +59,7 @@ def exif_size(img):
     return s
 
 
-def create_dataloader(path, imgsz, batch_size, stride, opt, hyp=None, augment=False, cache=False, pad=0.0, rect=False,
+def create_dataloader(path, imgsz, batch_size, stride, opt, hyp=None, augment=False, pad=0.0, rect=False,
                       rank=-1, world_size=1, workers=8, image_weights=False):
     # Make sure only the first process in DDP process the dataset first, and the following others can use the cache
     with torch_distributed_zero_first(rank):
@@ -67,11 +67,9 @@ def create_dataloader(path, imgsz, batch_size, stride, opt, hyp=None, augment=Fa
                                       augment=augment,  # augment images
                                       hyp=hyp,  # augmentation hyperparameters
                                       rect=rect,  # rectangular training
-                                      cache_images=cache,
                                       single_cls=opt.single_cls,
                                       stride=int(stride),
                                       pad=pad,
-                                      rank=rank,
                                       image_weights=image_weights)
 
     batch_size = min(batch_size, len(dataset))  # 确定bs大小
@@ -294,11 +292,9 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                  hyp=None,
                  rect=False,
                  image_weights=False,
-                 cache_images=False,
                  single_cls=False,
                  stride=32,
-                 pad=0.0,
-                 rank=-1):
+                 pad=0.0):
         self.img_size = img_size
         self.augment = augment
         self.hyp = hyp
