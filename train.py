@@ -31,7 +31,7 @@ from utils.general import labels_to_class_weights, increment_path, init_seeds, \
 from utils.google_utils import attempt_download
 from utils.loss import compute_loss
 from utils.metrics import fitness
-from utils.plots import plot_images, plot_labels, plot_results, plot_evolution, plot_lr_scheduler
+from utils.plots import plot_images, plot_labels, plot_results, plot_lr_scheduler
 from utils.torch_utils import ModelEMA, select_device, intersect_dicts, torch_distributed_zero_first
 
 logger = logging.getLogger(__name__)
