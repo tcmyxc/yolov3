@@ -242,29 +242,6 @@ def plot_labels(labels, save_dir=Path(''), loggers=None):
                 v.log({"Labels": [v.Image(str(x), caption=x.name) for x in save_dir.glob('*labels*.jpg')]})
 
 
-def plot_results_overlay(start=0, stop=0):  # from utils.plots import *; plot_results_overlay()
-    # Plot training 'results*.txt', overlaying train and val losses
-    s = ['train', 'train', 'train', 'Precision', 'mAP@0.5', 'val', 'val', 'val', 'Recall', 'mAP@0.5:0.95']  # legends
-    t = ['Box', 'Objectness', 'Classification', 'P-R', 'mAP-F1']  # titles
-    for f in sorted(glob.glob('results*.txt') + glob.glob('../../Downloads/results*.txt')):
-        results = np.loadtxt(f, usecols=[2, 3, 4, 8, 9, 12, 13, 14, 10, 11], ndmin=2).T
-        n = results.shape[1]  # number of rows
-        x = range(start, min(stop, n) if stop else n)
-        fig, ax = plt.subplots(1, 5, figsize=(14, 3.5), tight_layout=True)
-        ax = ax.ravel()
-        for i in range(5):
-            for j in [i, i + 5]:
-                y = results[j, x]
-                ax[i].plot(x, y, marker='.', label=s[j])
-                # y_smooth = butter_lowpass_filtfilt(y)
-                # ax[i].plot(x, np.gradient(y_smooth), marker='.', label=s[j])
-
-            ax[i].set_title(t[i])
-            ax[i].legend()
-            ax[i].set_ylabel(f) if i == 0 else None  # add filename
-        fig.savefig(f.replace('.txt', '.png'), dpi=200)
-
-
 def plot_results(start=0, stop=0, bucket='', id=(), labels=(), save_dir=''):
     # Plot training 'results*.txt'. from utils.plots import *; plot_results(save_dir='runs/train/exp')
     fig, ax = plt.subplots(2, 5, figsize=(12, 6), tight_layout=True)

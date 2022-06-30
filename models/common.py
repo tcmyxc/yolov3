@@ -18,11 +18,6 @@ def autopad(k, p=None):  # kernel, padding
     return p
 
 
-def DWConv(c1, c2, k=1, s=1, act=True):
-    # Depthwise convolution
-    return Conv(c1, c2, k, s, g=math.gcd(c1, c2), act=act)
-
-
 class Conv(nn.Module):
     # Standard convolution
     def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True):  # ch_in, ch_out, kernel, stride, padding, groups
@@ -187,4 +182,3 @@ class Detections:
             for k in ['imgs', 'pred', 'xyxy', 'xyxyn', 'xywh', 'xywhn']:
                 setattr(d, k, getattr(d, k)[0])  # pop out of list
         return x
-
