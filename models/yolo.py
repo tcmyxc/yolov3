@@ -25,7 +25,7 @@ class Detect(nn.Module):
         # nc = 80,
         # anchors = [[10, 13, 16, 30, 33, 23], [30, 61, 62, 45, 59, 119], [116, 90, 156, 198, 373, 326]]
         # ch = [256, 512, 1024]]
-        super(Detect, self).__init__()
+        super().__init__()
         self.nc = nc  # number of classes, 80, 类别数量
         self.no = nc + 5  # number of outputs per anchor, 85, 每个anchor的输出: 是否有感兴趣的物体+四个坐标+每个类别的概率
         self.nl = len(anchors)  # number of detection layers, 3, 检测层的数量(每一层都有对应匹配的anchor)
@@ -71,7 +71,7 @@ class Detect(nn.Module):
 
 class Model(nn.Module):
     def __init__(self, cfg='yolov3.yaml', ch=3, nc=None):  # model, input channels, number of classes
-        super(Model, self).__init__()
+        super().__init__()
         if isinstance(cfg, dict):
             self.yaml = cfg  # model dict
         else:  # is *.yaml

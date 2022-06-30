@@ -26,11 +26,11 @@ from models.experimental import attempt_load
 from models.yolo import Model
 from utils.autoanchor import check_anchors
 from utils.datasets import create_dataloader
-from utils.general import labels_to_class_weights, increment_path, labels_to_image_weights, init_seeds, \
-    fitness, strip_optimizer, get_latest_run, check_dataset, check_file, check_img_size, \
-    print_mutation, set_logging
+from utils.general import labels_to_class_weights, increment_path, init_seeds, \
+    strip_optimizer, get_latest_run, check_dataset, check_file, check_img_size, set_logging
 from utils.google_utils import attempt_download
 from utils.loss import compute_loss
+from utils.metrics import fitness
 from utils.plots import plot_images, plot_labels, plot_results, plot_evolution, plot_lr_scheduler
 from utils.torch_utils import ModelEMA, select_device, intersect_dicts, torch_distributed_zero_first
 
@@ -423,7 +423,7 @@ if __name__ == '__main__':
     # 超参数路径
     parser.add_argument('--hyp', type=str, default='data/hyp.scratch.yaml', help='hyperparameters path')
     # 训练epoch数, batch_size, img_size
-    parser.add_argument('--epochs', type=int, default=5)
+    parser.add_argument('--epochs', type=int, default=1)
     parser.add_argument('--batch-size', type=int, default=1, help='total batch size for all GPUs')
     parser.add_argument('--img-size', nargs='+', type=int, default=[320, 320], help='[train, test] image sizes')
     # 矩形训练
