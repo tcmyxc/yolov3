@@ -5,10 +5,7 @@ import logging
 import math
 import os
 import random
-import shutil
 import time
-from itertools import repeat
-from multiprocessing.pool import ThreadPool
 from pathlib import Path
 from threading import Thread
 
@@ -19,7 +16,7 @@ from PIL import Image, ExifTags
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
-from utils.general import xyxy2xywh, xywh2xyxy
+from utils.general import xyxy2xywh
 from utils.torch_utils import torch_distributed_zero_first
 
 # Parameters

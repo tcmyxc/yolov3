@@ -82,7 +82,7 @@ def train(hyp, opt, device, tb_writer=None):
         if hyp.get('anchors'):
             ckpt['model'].yaml['anchors'] = round(hyp['anchors'])  # force autoanchor
 
-        # 创建模型
+        # 创建模型，配置要么从opt.cfg获取，要么从权重文件里面获取
         model = Model(opt.cfg or ckpt['model'].yaml, ch=3, nc=nc).to(device)  # create
         exclude = ['anchor'] if opt.cfg or hyp.get('anchors') else []  # exclude keys
         state_dict = ckpt['model'].float().state_dict()  # to FP32
@@ -102,6 +102,7 @@ def train(hyp, opt, device, tb_writer=None):
 
     # Optimizer
     nbs = 64  # nominal batch size 象征性的bs
+    # 这里的意思大概是: 如果batch size小于64，则凑够64张图片再计算loss
     accumulate = max(round(nbs / total_batch_size), 1)  # accumulate loss before optimizing
     hyp['weight_decay'] *= total_batch_size * accumulate / nbs  # scale weight_decay
 
@@ -182,11 +183,12 @@ def train(hyp, opt, device, tb_writer=None):
                                             gs,
                                             opt,
                                             hyp=hyp,
-                                            augment=False,
+                                            augment=False,  # 源代码是true
                                             rect=opt.rect,
                                             rank=rank,
                                             world_size=opt.world_size,
                                             workers=opt.workers)
+    # 取标签那一列
     mlc = np.concatenate(dataset.labels, 0)[:, 0].max()  # max label class
     nb = len(dataloader)  # 小批量的数量
     assert mlc < nc, 'Label class %g exceeds nc=%g in %s. Possible class labels are 0-%g' % (mlc, nc, opt.data, nc - 1)
@@ -256,8 +258,8 @@ def train(hyp, opt, device, tb_writer=None):
         if rank in [-1, 0]:
             pbar = tqdm(pbar, total=nb)  # progress bar
         optimizer.zero_grad()
+
         # 图片数据 标签信息 图片路径 shape
-        # todo: 看到这里
         for i, (imgs, targets, paths, _) in pbar:  # batch -------------------------------------------------------------
             # ni是数据流转了多少个小批量
             ni = i + nb * epoch  # number integrated batches (since train start)
@@ -285,7 +287,8 @@ def train(hyp, opt, device, tb_writer=None):
 
             # Forward
             with amp.autocast(enabled=cuda):
-                pred = model(imgs)  # forward
+                pred = model(imgs)  # forward，得到检测头的输出
+                # 计算损失
                 loss, loss_items = compute_loss(pred, targets.to(device), model)  # loss scaled by batch_size
                 if rank != -1:
                     loss *= opt.world_size  # gradient averaged between devices in DDP mode
@@ -305,8 +308,7 @@ def train(hyp, opt, device, tb_writer=None):
             if rank in [-1, 0]:
                 mloss = (mloss * i + loss_items) / (i + 1)  # update mean losses
                 mem = '%.3gG' % (torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0)  # (GB)
-                s = ('%10s' * 2 + '%10.4g' * 6) % (
-                    '%g/%g' % (epoch, epochs - 1), mem, *mloss, targets.shape[0], imgs.shape[-1])
+                s = ('%10s' * 2 + '%10.4g' * 6) % ('%g/%g' % (epoch, epochs - 1), mem, *mloss, targets.shape[0], imgs.shape[-1])
                 pbar.set_description(s)
 
                 # Plot
@@ -326,6 +328,7 @@ def train(hyp, opt, device, tb_writer=None):
             # mAP
             if ema:
                 ema.update_attr(model, include=['yaml', 'nc', 'hyp', 'gr', 'names', 'stride'])
+            # 看看是不是最后一轮epoch
             final_epoch = epoch + 1 == epochs
             if not opt.notest or final_epoch:  # Calculate mAP
                 results, maps, times = test.test(opt.data,
@@ -421,7 +424,7 @@ if __name__ == '__main__':
     parser.add_argument('--hyp', type=str, default='data/hyp.scratch.yaml', help='hyperparameters path')
     # 训练epoch数, batch_size, img_size
     parser.add_argument('--epochs', type=int, default=5)
-    parser.add_argument('--batch-size', type=int, default=4, help='total batch size for all GPUs')
+    parser.add_argument('--batch-size', type=int, default=1, help='total batch size for all GPUs')
     parser.add_argument('--img-size', nargs='+', type=int, default=[320, 320], help='[train, test] image sizes')
     # 矩形训练
     parser.add_argument('--rect', action='store_true', help='rectangular training')
@@ -446,7 +449,7 @@ if __name__ == '__main__':
     opt = parser.parse_args()
 
     # 设置 DDP 变量
-    opt.total_batch_size = opt.batch_size
+    opt.total_batch_size = opt.batch_size  # 如果是单卡，这两个数值是相等的
     # world_size: 全局进程个数, 通常是1
     opt.world_size = int(os.environ['WORLD_SIZE']) if 'WORLD_SIZE' in os.environ else 1
     # rank表示进程序号，用于进程间的通讯
@@ -480,7 +483,7 @@ if __name__ == '__main__':
         device = torch.device('cuda', opt.local_rank)
         dist.init_process_group(backend='nccl', init_method='env://')  # distributed backend
         assert opt.batch_size % opt.world_size == 0, '--batch-size must be multiple of CUDA device count'
-        opt.batch_size = opt.total_batch_size // opt.world_size
+        opt.batch_size = opt.total_batch_size // opt.world_size  # 每张卡上batch_size的数量
 
     # Hyperparameters
     with open(opt.hyp) as f:
@@ -490,7 +493,6 @@ if __name__ == '__main__':
                  (opt.hyp, 'https://github.com/ultralytics/yolov5/pull/1120'))
             hyp['box'] = hyp.pop('giou')
 
-    # Train
     logger.info(opt)
 
     tb_writer = None  # init loggers
